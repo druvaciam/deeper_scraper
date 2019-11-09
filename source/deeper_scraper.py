@@ -7,10 +7,10 @@ Created on Mon Oct 28 16:30:55 2019
 
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
+from urllib.request import urlretrieve
 import sys
 import os
 import time
-from urllib.request import urlretrieve
 import codecs
 import shutil
 import glob
@@ -19,6 +19,7 @@ import traceback
 
 
 timeout_sec = 4
+
 
 def save_html(html, file_path):
     with codecs.open(file_path, "w", "utf-8") as file_object:
@@ -45,15 +46,15 @@ def wait_for_js(driver):
         pass
 
 
-main_page = 'https://www.deeper.com'
+lansky_studios = ['deeper', 'tushy', 'vixen', 'blacked', 'blackedraw', 'tushyraw']
+free_demo_studios = ['deeper', 'tushyraw']
 autoplay_postfix = "?autoplay=true"
 geckodriver_path = 'geckodriver.exe'
-base_dir = 'deeper_content'
 
 
-def process_video_url(driver, href, videos_dir, force = False):
+def process_video_url(driver, href, videos_dir, studio_name, force = False):
     video_dir = os.path.join(videos_dir, href.split('/')[-1])
-    if os.path.exists(video_dir) and glob.glob(video_dir + '/*.mp4') and \
+    if (glob.glob(video_dir + '/*.mp4') or not studio_name in free_demo_studios) and \
         os.path.exists(f"{video_dir}/video.json") and os.path.exists(f"{video_dir}/video.html"):
         print(f"'{video_dir}' was already filled")
         if not force:
@@ -64,10 +65,40 @@ def process_video_url(driver, href, videos_dir, force = False):
     driver.get(vid_url)
     wait_for_js(driver)
     time.sleep(timeout_sec)
+
+    save_html(driver.page_source, f"{video_dir}/video.html")
+
+    def parse_metadata():
+        scripts = driver.find_elements_by_tag_name('script')
+        for script in scripts:
+            if 'window.__INITIAL_STATE__' in script.get_attribute('innerHTML'):
+                inner_state_script = script.get_attribute('innerHTML').strip()
+                inner_json = json.loads(inner_state_script[27:-1])
+                for video in inner_json['videos']:
+                    if 'chapters' in video:
+                        print('\n------------------------------------------------')
+                        print(video['modelsSpaced'], '-', video['title'], 'by', video['directorNames'])
+                        print(video['description'])
+                        print(video['tags'])
+                        print('------------------------------------------------\n')
+                        with open(f"{video_dir}/video.json", "w") as out_file:
+                            json.dump(video, out_file, indent=4, sort_keys=True)
+                        break
+                break
+    parse_metadata()
+
     buttons = driver.find_elements_by_tag_name('button')
     for button in buttons:
         if button.get_attribute('title') == "Quality":
-            button.click()
+
+            for i in range(10):
+                try:
+                    button.click()
+                    break
+                except Exception as ex:
+                    print(f"button.click() error: {ex!r}")
+                    time.sleep(1)
+
             time.sleep(1)
             lis = driver.find_elements_by_tag_name('li')
             for li in lis:
@@ -90,32 +121,16 @@ def process_video_url(driver, href, videos_dir, force = False):
                             if os.path.exists(save_path.split('.')[0] + '.html'):       # migration
                                 os.remove(save_path.split('.')[0] + '.html')            # migration
 
-                            save_html(driver.page_source, f"{video_dir}/video.html")
+
                             if os.path.exists(save_path):
                                 print(f"{save_path} was already downloaded")
                             else:
+                                driver.get(href) # just to prevent double video loading
                                 urlretrieve(vid_url, save_path)
                                 print(f"{save_path} is downloaded")
                             break
 
 
-                    break
-            break
-
-    scripts = driver.find_elements_by_tag_name('script')
-    for script in scripts:
-        if 'window.__INITIAL_STATE__' in script.get_attribute('innerHTML'):
-            inner_state_script = script.get_attribute('innerHTML').strip()
-            inner_json = json.loads(inner_state_script[27:-1])
-            for video in inner_json['videos']:
-                if 'chapters' in video:
-                    print('\n------------------------------------------------')
-                    print(video['modelsSpaced'], '-', video['title'], 'by', video['directorNames'])
-                    print(video['description'])
-                    print(video['tags'])
-                    print('------------------------------------------------\n')
-                    with open(f"{video_dir}/video.json", "w") as out_file:
-                        json.dump(video, out_file, indent=4, sort_keys=True)
                     break
             break
 
@@ -125,34 +140,39 @@ def main():
         driver = webdriver.Firefox(executable_path = geckodriver_path)
         driver.set_page_load_timeout(50)
         driver.maximize_window()
+        driver.minimize_window()
 
-        videos_dir = f"{base_dir}/videos"
-        check_directory(videos_dir)
+        for studio_name in lansky_studios:
+                main_page = f'https://www.{studio_name}.com'
+                base_dir = f'{studio_name}_content'
 
-        driver.get(main_page)
-        clock_next = driver.find_elements_by_xpath("//p[@data-test-component='ClockDateTitle']")
-        if clock_next:
-            print(f"watch next on {main_page} at {clock_next.get_text()}")
-        else:
-            footer_video = driver.find_elements_by_xpath("//div[@data-test-component='ModelList']/following-sibling::div")
-            if footer_video:
-                href = footer_video[0].find_element_by_tag_name('a').get_attribute('href')
-                print('newest scene:', href)
-                process_video_url(driver, href, videos_dir)
+                videos_dir = f"{base_dir}/videos"
+                check_directory(videos_dir)
+
+                driver.get(main_page)
+                clock_next = driver.find_elements_by_xpath("//p[@data-test-component='ClockDateTitle']")
+                if clock_next:
+                    print(f"watch next on {main_page} at {clock_next[0].get_attribute('innerHTML')}")
+                else:
+                    footer_video = driver.find_elements_by_xpath("//div[@data-test-component='ModelList']/following-sibling::div")
+                    if footer_video:
+                        href = footer_video[0].find_element_by_tag_name('a').get_attribute('href')
+                        print('newest scene:', href)
+                        process_video_url(driver, href, videos_dir, studio_name)
 
 
-        for page in range(1, 100): # TODO: take max page from the web
-            url = f'{main_page}/videos?page={page}&size=12'
-            driver.get(url)
-            wait_for_js(driver)
-            time.sleep(timeout_sec)
-            save_html(driver.page_source, f"{videos_dir}/videos{page}.html")
-            vid_containers = driver.find_elements_by_xpath(f"//div[@data-test-component='VideoThumbnailContainer']")
-            refs = [container.find_element_by_tag_name('a').get_attribute('href') for container in vid_containers]
-            if not refs:
-                break
-            for href in refs:
-                process_video_url(driver, href, videos_dir)
+                for page in range(1, 100): # TODO: take max page from the web
+                    url = f'{main_page}/videos?page={page}&size=12'
+                    driver.get(url)
+                    wait_for_js(driver)
+                    time.sleep(timeout_sec)
+                    save_html(driver.page_source, f"{videos_dir}/videos{page}.html")
+                    vid_containers = driver.find_elements_by_xpath(f"//div[@data-test-component='VideoThumbnailContainer']")
+                    refs = [container.find_element_by_tag_name('a').get_attribute('href') for container in vid_containers]
+                    if not refs:
+                        break
+                    for href in refs:
+                        process_video_url(driver, href, videos_dir, studio_name)
     except Exception as ex:
         print(f"Exception: {ex!r}")
         traceback.print_exc(file=sys.stdout)
