@@ -26,6 +26,10 @@ def save_html(html, file_path):
         file_object.write(html)
 
 
+def file_name_from_url(url):
+    return url.split('/')[-1].split('?')[0]
+
+
 def check_directory(path):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -53,7 +57,7 @@ geckodriver_path = 'geckodriver.exe'
 
 
 def process_video_url(driver, href, videos_dir, studio_name, force = False):
-    video_dir = os.path.join(videos_dir, href.split('/')[-1])
+    video_dir = os.path.join(videos_dir, file_name_from_url(href))
     if (glob.glob(video_dir + '/*.mp4') or not studio_name in free_demo_studios) and \
         os.path.exists(f"{video_dir}/video.json") and os.path.exists(f"{video_dir}/video.html"):
         print(f"'{video_dir}' was already filled")
@@ -61,7 +65,7 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
             return
 
     check_directory(video_dir)
-    vid_url = href + autoplay_postfix
+    vid_url = href + [autoplay_postfix, ''][href.endswith(autoplay_postfix)]
     driver.get(vid_url)
     wait_for_js(driver)
     time.sleep(timeout_sec)
@@ -142,6 +146,7 @@ def main():
         driver.maximize_window()
         driver.minimize_window()
 
+        print('\nscraping recent lansky videos...')
         for studio_name in lansky_studios:
                 main_page = f'https://www.{studio_name}.com'
                 base_dir = f'{studio_name}_content'
@@ -160,6 +165,19 @@ def main():
                         print('newest scene:', href)
                         process_video_url(driver, href, videos_dir, studio_name)
 
+                hero = driver.find_elements_by_xpath("//div[@data-test-component='VideoHero']")
+                if hero:
+                    href = hero[0].find_element_by_tag_name('a').get_attribute('href')
+                    print('hero scene:', href)
+                    process_video_url(driver, href, videos_dir, studio_name)
+
+        print('\nscraping older lansky videos...')
+        for studio_name in lansky_studios:
+                main_page = f'https://www.{studio_name}.com'
+                base_dir = f'{studio_name}_content'
+
+                videos_dir = f"{base_dir}/videos"
+                check_directory(videos_dir)
 
                 for page in range(1, 100): # TODO: take max page from the web
                     url = f'{main_page}/videos?page={page}&size=12'
