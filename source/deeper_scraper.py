@@ -160,13 +160,13 @@ def main():
                     print(f"watch next on {main_page} at {clock_next[0].get_attribute('innerHTML')}")
                 else:
                     footer_video = driver.find_elements_by_xpath("//div[@data-test-component='ModelList']/following-sibling::div")
-                    if footer_video:
+                    if footer_video and footer_video[0].find_elements_by_tag_name('a'):
                         href = footer_video[0].find_element_by_tag_name('a').get_attribute('href')
                         print('newest scene:', href)
                         process_video_url(driver, href, videos_dir, studio_name)
 
                 hero = driver.find_elements_by_xpath("//div[@data-test-component='VideoHero']")
-                if hero:
+                if hero and hero[0].find_elements_by_tag_name('a'):
                     href = hero[0].find_element_by_tag_name('a').get_attribute('href')
                     print('hero scene:', href)
                     process_video_url(driver, href, videos_dir, studio_name)
