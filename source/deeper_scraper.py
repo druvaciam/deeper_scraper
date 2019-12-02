@@ -148,49 +148,59 @@ def main():
 
         print('\nscraping recent lansky videos...')
         for studio_name in lansky_studios:
-                main_page = f'https://www.{studio_name}.com'
-                base_dir = f'{studio_name}_content'
+            main_page = f'https://www.{studio_name}.com'
+            base_dir = f'{studio_name}_content'
 
-                videos_dir = f"{base_dir}/videos"
-                check_directory(videos_dir)
+            videos_dir = f"{base_dir}/videos"
+            check_directory(videos_dir)
 
-                driver.get(main_page)
-                clock_next = driver.find_elements_by_xpath("//p[@data-test-component='ClockDateTitle']")
-                if clock_next:
-                    print(f"watch next on {main_page} at {clock_next[0].get_attribute('innerHTML')}")
+            driver.get(main_page)
+            clock_next = None
+            for _ in range(3): # thry a few time
+                try:
+                    clock_next = driver.find_elements_by_xpath("//p[@data-test-component='ClockDateTitle']")
+                except Exception as ex:
+                    print(f"Error during ClockDateTitle search ({studio_name}): {ex!r}")
+                    time.sleep(timeout_sec)
                 else:
-                    footer_video = driver.find_elements_by_xpath("//div[@data-test-component='ModelList']/following-sibling::div")
-                    if footer_video and footer_video[0].find_elements_by_tag_name('a'):
-                        href = footer_video[0].find_element_by_tag_name('a').get_attribute('href')
+                    break
+            if clock_next:
+                print(f"watch next on {main_page} at {clock_next[0].get_attribute('innerHTML')}")
+            else:
+                footer_video = driver.find_elements_by_xpath("//div[@data-test-component='ModelList']/following-sibling::div")
+                if footer_video and footer_video[0].find_elements_by_tag_name('a'):
+                    href = footer_video[0].find_element_by_tag_name('a').get_attribute('href')
+                    if not 'members.' in href:
                         print('newest scene:', href)
-                        process_video_url(driver, href, videos_dir, studio_name)
+                        process_video_url(driver, href, videos_dir, studio_name, force=True)
 
-                hero = driver.find_elements_by_xpath("//div[@data-test-component='VideoHero']")
-                if hero and hero[0].find_elements_by_tag_name('a'):
-                    href = hero[0].find_element_by_tag_name('a').get_attribute('href')
+            hero = driver.find_elements_by_xpath("//div[@data-test-component='VideoHero']")
+            if hero and hero[0].find_elements_by_tag_name('a'):
+                href = hero[0].find_element_by_tag_name('a').get_attribute('href')
+                if not 'members.' in href:
                     print('hero scene:', href)
-                    process_video_url(driver, href, videos_dir, studio_name)
+                    process_video_url(driver, href, videos_dir, studio_name, force=True)
 
         print('\nscraping older lansky videos...')
         for studio_name in lansky_studios:
-                main_page = f'https://www.{studio_name}.com'
-                base_dir = f'{studio_name}_content'
+            main_page = f'https://www.{studio_name}.com'
+            base_dir = f'{studio_name}_content'
 
-                videos_dir = f"{base_dir}/videos"
-                check_directory(videos_dir)
+            videos_dir = f"{base_dir}/videos"
+            check_directory(videos_dir)
 
-                for page in range(1, 100): # TODO: take max page from the web
-                    url = f'{main_page}/videos?page={page}&size=12'
-                    driver.get(url)
-                    wait_for_js(driver)
-                    time.sleep(timeout_sec)
-                    save_html(driver.page_source, f"{videos_dir}/videos{page}.html")
-                    vid_containers = driver.find_elements_by_xpath(f"//div[@data-test-component='VideoThumbnailContainer']")
-                    refs = [container.find_element_by_tag_name('a').get_attribute('href') for container in vid_containers]
-                    if not refs:
-                        break
-                    for href in refs:
-                        process_video_url(driver, href, videos_dir, studio_name)
+            for page in range(1, 100): # TODO: take max page from the web
+                url = f'{main_page}/videos?page={page}&size=12'
+                driver.get(url)
+                wait_for_js(driver)
+                time.sleep(timeout_sec)
+                save_html(driver.page_source, f"{videos_dir}/videos{page}.html")
+                vid_containers = driver.find_elements_by_xpath(f"//div[@data-test-component='VideoThumbnailContainer']")
+                refs = [container.find_element_by_tag_name('a').get_attribute('href') for container in vid_containers]
+                if not refs:
+                    break
+                for href in refs:
+                    process_video_url(driver, href, videos_dir, studio_name)
     except Exception as ex:
         print(f"Exception: {ex!r}")
         traceback.print_exc(file=sys.stdout)
