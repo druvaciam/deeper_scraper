@@ -61,7 +61,7 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
     video_dir = os.path.join(videos_dir, file_name_from_url(href))
     if (glob.glob(video_dir + '/*.mp4') or not studio_name in free_demo_studios) and \
         os.path.exists(f"{video_dir}/video.json") and os.path.exists(f"{video_dir}/video.html") and \
-        os.path.exists(f"{video_dir}/images/08.jpg"):
+        os.path.exists(f"{video_dir}/images/08.jpg") and os.path.exists(f"{video_dir}/images/07.jpg"):
         print(f"'{video_dir}' was already filled")
         if not force:
             return
@@ -148,7 +148,7 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
             find_element_by_tag_name('img').get_attribute('src')
         file_name = file_name_from_url(main_landscape_url)
         urlretrieve(main_landscape_url, f"{images_dir}/{file_name}")
-        print(file_name, "is saved")
+        print(file_name, 'is saved')
 
         driver.find_element_by_xpath("//div[@class='swiper-wrapper']").find_element_by_tag_name('img').click()
         time.sleep(1)
@@ -160,12 +160,42 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
             if '01.jpg' in image_url:
                 image_url_format = image_url.replace('01.jpg', '0{}.jpg')
                 break
+        retrieving_failed = False
         if image_url_format:
             for i in range(8):
                 image_url = image_url_format.format(i+1)
                 file_name = file_name_from_url(image_url)
-                urlretrieve(image_url, f"{images_dir}/{file_name}")
-                print(file_name, "is saved")
+                try:
+                    urlretrieve(image_url, f"{images_dir}/{file_name}")
+                    print(file_name, 'is saved')
+                except:
+                    retrieving_failed = True
+                    print(image_url, 'is failed')
+        if retrieving_failed:
+            for i in range(8):
+                driver.get(href)
+                wait_for_js(driver)
+                time.sleep(1)
+                try:
+                    driver.find_element_by_xpath("//div[@class='swiper-wrapper']").find_elements_by_tag_name('img')[i].click()
+                    for _ in range(100): # try a few times
+                        try:
+                            imgs = driver.find_elements_by_xpath("//img[@class='pswp__img']")
+                            if not imgs:
+                                time.sleep(_ * .001)
+                                continue
+                            for img in imgs:
+                                driver.execute_script("window.stop();")
+                                image_url = img.get_attribute('src')
+                                file_name = file_name_from_url(image_url)
+                                urlretrieve(image_url, f"{images_dir}/{file_name}")
+                                print(file_name, 'is saved')
+                        except:
+                            print("failed #", _)
+                        else:
+                            break
+                except:
+                    print(f'failed to click image #{i+1}')
 
     scrap_images()
 
@@ -177,7 +207,7 @@ def main():
         driver.minimize_window()
 
         print('\nscraping recent lansky videos...')
-        for studio_name in lansky_studios:
+        for studio_name in []:#lansky_studios:
             main_page = f'https://www.{studio_name}.com'
             base_dir = f'{studio_name}_content'
 
