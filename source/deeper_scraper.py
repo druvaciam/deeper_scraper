@@ -60,7 +60,8 @@ geckodriver_path = 'geckodriver.exe'
 def process_video_url(driver, href, videos_dir, studio_name, force = False):
     video_dir = os.path.join(videos_dir, file_name_from_url(href))
     if (glob.glob(video_dir + '/*.mp4') or not studio_name in free_demo_studios) and \
-        os.path.exists(f"{video_dir}/video.json") and os.path.exists(f"{video_dir}/video.html"):
+        os.path.exists(f"{video_dir}/video.json") and os.path.exists(f"{video_dir}/video.html") and \
+        os.path.exists(f"{video_dir}/images/08.jpg"):
         print(f"'{video_dir}' was already filled")
         if not force:
             return
@@ -138,6 +139,35 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
 
                     break
             break
+
+    def scrap_images():
+        images_dir = f"{video_dir}/images"
+        check_directory(images_dir)
+
+        main_landscape_url = driver.find_element_by_xpath("//div[@data-test-component='VideoCoverWrapper']").\
+            find_element_by_tag_name('img').get_attribute('src')
+        file_name = file_name_from_url(main_landscape_url)
+        urlretrieve(main_landscape_url, f"{images_dir}/{file_name}")
+        print(file_name, "is saved")
+
+        driver.find_element_by_xpath("//div[@class='swiper-wrapper']").find_element_by_tag_name('img').click()
+        time.sleep(1)
+
+        images = driver.find_elements_by_xpath("//div[@class='pswp__item']")
+        image_url_format = None
+        for image in images:
+            image_url = image.find_element_by_tag_name('img').get_attribute('src')
+            if '01.jpg' in image_url:
+                image_url_format = image_url.replace('01.jpg', '0{}.jpg')
+                break
+        if image_url_format:
+            for i in range(8):
+                image_url = image_url_format.format(i+1)
+                file_name = file_name_from_url(image_url)
+                urlretrieve(image_url, f"{images_dir}/{file_name}")
+                print(file_name, "is saved")
+
+    scrap_images()
 
 
 def main():
