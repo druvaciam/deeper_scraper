@@ -61,7 +61,7 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
     video_dir = os.path.join(videos_dir, file_name_from_url(href))
     if (glob.glob(video_dir + '/*.mp4') or not studio_name in free_demo_studios) and \
         os.path.exists(f"{video_dir}/video.json") and os.path.exists(f"{video_dir}/video.html") and \
-        os.path.exists(f"{video_dir}/images/08.jpg") and os.path.exists(f"{video_dir}/images/07.jpg"):
+        os.path.exists(f"{video_dir}/images/08.jpg"): #and os.path.exists(f"{video_dir}/images/07.jpg"):
         print(f"'{video_dir}' was already filled")
         if not force:
             return
@@ -110,7 +110,11 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
             for li in lis:
                 #print(li.get_attribute('innerHTML'))
                 if '1080p' in li.get_attribute('innerHTML'):
-                    li.click()
+                    try:
+                        li.click()
+                    except:
+                        time.sleep(1)
+                        li.click() # try one more time
                     time.sleep(1)
                     videos = driver.find_elements_by_tag_name('video')
                     for video in videos:
@@ -156,10 +160,13 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
         images = driver.find_elements_by_xpath("//div[@class='pswp__item']")
         image_url_format = None
         for image in images:
+            if not image:
+                continue
             image_url = image.find_element_by_tag_name('img').get_attribute('src')
             if '01.jpg' in image_url:
                 image_url_format = image_url.replace('01.jpg', '0{}.jpg')
                 break
+
         retrieving_failed = False
         if image_url_format:
             for i in range(8):
@@ -171,14 +178,17 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
                 except:
                     retrieving_failed = True
                     print(image_url, 'is failed')
-        if retrieving_failed:
+
+        if retrieving_failed or not image_url_format:
+            # the next approach doesn't work always, sometimes for images 5-8 redirection to member page occurs
+            # TODO: try to block redirection
             for i in range(8):
                 driver.get(href)
                 wait_for_js(driver)
                 time.sleep(1)
                 try:
                     driver.find_element_by_xpath("//div[@class='swiper-wrapper']").find_elements_by_tag_name('img')[i].click()
-                    for _ in range(100): # try a few times
+                    for _ in range(50): # try a few times
                         try:
                             imgs = driver.find_elements_by_xpath("//img[@class='pswp__img']")
                             if not imgs:
@@ -207,7 +217,7 @@ def main():
         driver.minimize_window()
 
         print('\nscraping recent lansky videos...')
-        for studio_name in []:#lansky_studios:
+        for studio_name in lansky_studios:
             main_page = f'https://www.{studio_name}.com'
             base_dir = f'{studio_name}_content'
 
