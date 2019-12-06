@@ -57,6 +57,29 @@ autoplay_postfix = "?autoplay=true"
 geckodriver_path = 'geckodriver.exe'
 
 
+def scrap_model(driver, model_url, models_dir):
+    model_name = model_url.split('/')[-1]
+    model_dir = f"{models_dir}/{model_name}"
+    model_html_file_path = f"{model_dir}/{model_name}.html"
+    check_directory(model_dir)
+    if os.path.exists(model_html_file_path):
+        return
+    driver.get(model_url)
+    wait_for_js(driver)
+    time.sleep(timeout_sec)
+
+    images = driver.find_elements_by_xpath("//div[@data-test-component='ProgressiveImage']")
+    for image in images:
+        image_url = image.find_element_by_tag_name('img').get_attribute('src')
+        if not image_url:
+            continue
+        file_name = file_name_from_url(image_url)
+        urlretrieve(image_url, f"{model_dir}/{file_name}")
+        print(file_name, 'is saved')
+
+    save_html(driver.page_source, model_html_file_path)
+
+
 def process_video_url(driver, href, videos_dir, studio_name, force = False):
     video_dir = os.path.join(videos_dir, file_name_from_url(href))
     if (glob.glob(video_dir + '/*.mp4') or not studio_name in free_demo_studios) and \
@@ -207,7 +230,15 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
                 except:
                     print(f'failed to click image #{i+1}')
 
+    models = driver.find_element_by_xpath("//div[@data-test-component='VideoModels']").\
+        find_elements_by_tag_name('a')
+    model_urls = [m.get_attribute('href') for m in models]
+
     scrap_images()
+
+    models_dir = f"{os.path.dirname(videos_dir)}/models"
+    for model_url in model_urls:
+        scrap_model(driver, model_url, models_dir)
 
 
 def main():
