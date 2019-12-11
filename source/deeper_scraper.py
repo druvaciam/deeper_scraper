@@ -19,7 +19,7 @@ import traceback
 import re
 
 
-timeout_sec = 4
+timeout_sec = 2
 
 
 def save_html(html, file_path):
@@ -292,24 +292,31 @@ def main():
 
             page, last_page = 1, 100
             while page <= last_page:
-                url = f'{main_page}/videos?page={page}&size=12'
-                driver.get(url)
-                wait_for_js(driver)
-                time.sleep(timeout_sec)
+                try:
+                    url = f'{main_page}/videos?page={page}&size=12'
+                    driver.get(url)
+                    wait_for_js(driver)
+                    time.sleep(timeout_sec)
 
-                if page == 1:
-                    last_ref = driver.find_element_by_xpath("//a[@data-test-component='PaginationLast']").get_attribute('href')
-                    last_page = int(re.search('page=(\d+)', last_ref).group(1))
-                    print(f"{studio_name} page count is {last_page}")
+                    if page == 1:
+                        last_ref = driver.find_element_by_xpath("//a[@data-test-component='PaginationLast']").get_attribute('href')
+                        last_page = int(re.search('page=(\d+)', last_ref).group(1))
+                        print(f"{studio_name} page count is {last_page}")
 
-                save_html(driver.page_source, f"{videos_dir}/videos{page}.html")
-                vid_containers = driver.find_elements_by_xpath(f"//div[@data-test-component='VideoThumbnailContainer']")
-                refs = [container.find_element_by_tag_name('a').get_attribute('href') for container in vid_containers]
-                if not refs:
-                    break
-                for href in refs:
-                    process_video_url(driver, href, videos_dir, studio_name)
-                page += 1
+                    save_html(driver.page_source, f"{videos_dir}/videos{page}.html")
+                    vid_containers = driver.find_elements_by_xpath(f"//div[@data-test-component='VideoThumbnailContainer']")
+                    refs = [container.find_element_by_tag_name('a').get_attribute('href') for container in vid_containers]
+                    if not refs:
+                        break
+                    for href in refs:
+                        process_video_url(driver, href, videos_dir, studio_name)
+                    page += 1
+                except KeyboardInterrupt:
+                    raise
+                except Exception as ex:
+                    print(f"Exception during processing page #{page} of {studio_name}: {ex!r}")
+                    traceback.print_exc(file=sys.stdout)
+
     except Exception as ex:
         print(f"Exception: {ex!r}")
         traceback.print_exc(file=sys.stdout)
