@@ -18,7 +18,6 @@ import json
 import traceback
 import re
 
-
 timeout_sec = 2
 
 
@@ -51,7 +50,8 @@ def wait_for_js(driver):
         pass
 
 
-lansky_studios = ['deeper', 'tushy', 'vixen', 'blacked', 'blackedraw', 'tushyraw']
+lansky_studios_short_and_names = {'d': 'deeper', 't': 'tushy', 'v': 'vixen', 'b': 'blacked', 'br': 'blackedraw', 'tr': 'tushyraw'}
+lansky_studios = list(lansky_studios_short_and_names.values())
 free_demo_studios = ['deeper', 'tushyraw']
 autoplay_postfix = "?autoplay=true"
 geckodriver_path = 'geckodriver.exe'
@@ -84,7 +84,8 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
     video_dir = os.path.join(videos_dir, file_name_from_url(href))
     if (glob.glob(video_dir + '/*.mp4') or not studio_name in free_demo_studios) and \
         os.path.exists(f"{video_dir}/video.json") and os.path.exists(f"{video_dir}/video.html") and \
-        os.path.exists(f"{video_dir}/images/08.jpg"): #and os.path.exists(f"{video_dir}/images/07.jpg"):
+        os.path.exists(f"{video_dir}/images/05.jpg") and os.path.exists(f"{video_dir}/images/07.jpg") and \
+        os.path.exists(f"{video_dir}/images/02.jpg") and os.path.exists(f"{video_dir}/images/06.jpg"):
         print(f"'{video_dir}' was already filled")
         if not force:
             return
@@ -203,14 +204,13 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
                     print(image_url, 'is failed')
 
         if retrieving_failed or not image_url_format:
-            # the next approach doesn't work always, sometimes for images 5-8 redirection to member page occurs
-            # TODO: try to block redirection
-            for i in range(8):
+            for i in range(0, 8, 3):
                 driver.get(href)
                 wait_for_js(driver)
                 time.sleep(1)
                 try:
-                    driver.find_element_by_xpath("//div[@class='swiper-wrapper']").find_elements_by_tag_name('img')[i].click()
+                    element = driver.find_element_by_xpath("//div[@class='swiper-wrapper']").find_elements_by_tag_name('img')[i]
+                    driver.execute_script("arguments[0].click();", element);
                     for _ in range(50): # try a few times
                         try:
                             imgs = driver.find_elements_by_xpath("//img[@class='pswp__img']")
@@ -223,10 +223,15 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
                                 file_name = file_name_from_url(image_url)
                                 urlretrieve(image_url, f"{images_dir}/{file_name}")
                                 print(file_name, 'is saved')
+                        except KeyboardInterrupt:
+                            raise
                         except:
                             print("failed #", _)
                         else:
                             break
+                    if 'members.' in driver.current_url:
+                        print('redirected to', driver.current_url)
+                        break
                 except:
                     print(f'failed to click image #{i+1}')
 
@@ -243,8 +248,20 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
 
 def main():
     try:
+        global lansky_studios
+        studios_str = input(f'What studios should be scraped: \'all\' or some combination of {list(lansky_studios_short_and_names.keys())}\n')
+        if studios_str.lower() == 'all':
+            pass
+        else:
+            lansky_studios = []
+            for s in studios_str.split():
+                if s in lansky_studios_short_and_names:
+                    lansky_studios.append(lansky_studios_short_and_names[s])
+        print(f'{lansky_studios} will be scraped')
+
+
         driver = webdriver.Firefox(executable_path = geckodriver_path)
-        driver.set_page_load_timeout(50)
+        driver.set_page_load_timeout(20)
         driver.minimize_window()
 
         print('\nscraping recent lansky videos...')
