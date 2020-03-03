@@ -41,12 +41,12 @@ def wait_for_js(driver):
     try:
         wait.until(lambda driver: driver.execute_script('return jQuery.active') == 0)
         #print("jQuery.active == 0")
-    except:
+    except Exception:
         pass
     try:
         wait.until(lambda driver: driver.execute_script('return document.readyState') == 'complete')
         #print("document.readyState == complete")
-    except:
+    except Exception:
         pass
 
 
@@ -103,7 +103,8 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
         for script in scripts:
             if 'window.__INITIAL_STATE__' in script.get_attribute('innerHTML'):
                 inner_state_script = script.get_attribute('innerHTML').strip()
-                inner_json = json.loads(inner_state_script[27:-1])
+                #inner_json = json.loads(inner_state_script[27:-1]) # doesn't work anymore
+                inner_json = json.loads(inner_state_script[inner_state_script.index('{'):].split(';')[0])
                 for video in inner_json['videos']:
                     if 'chapters' in video:
                         print('\n------------------------------------------------')
@@ -136,7 +137,7 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
                 if '1080p' in li.get_attribute('innerHTML'):
                     try:
                         li.click()
-                    except:
+                    except Exception:
                         time.sleep(1)
                         li.click() # try one more time
                     time.sleep(1)
@@ -179,7 +180,7 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
         print(file_name, 'is saved')
 
         driver.find_element_by_xpath("//div[@class='swiper-wrapper']").find_element_by_tag_name('img').click()
-        time.sleep(1)
+        time.sleep(timeout_sec)
 
         images = driver.find_elements_by_xpath("//div[@class='pswp__item']")
         image_url_format = None
@@ -199,7 +200,7 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
                 try:
                     urlretrieve(image_url, f"{images_dir}/{file_name}")
                     print(file_name, 'is saved')
-                except:
+                except Exception:
                     retrieving_failed = True
                     print(image_url, 'is failed')
 
@@ -223,16 +224,14 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
                                 file_name = file_name_from_url(image_url)
                                 urlretrieve(image_url, f"{images_dir}/{file_name}")
                                 print(file_name, 'is saved')
-                        except KeyboardInterrupt:
-                            raise
-                        except:
+                        except Exception:
                             print("failed #", _)
                         else:
                             break
                     if 'members.' in driver.current_url:
                         print('redirected to', driver.current_url)
                         break
-                except:
+                except Exception:
                     print(f'failed to click image #{i+1}')
 
     models = driver.find_element_by_xpath("//div[@data-test-component='VideoModels']").\
@@ -250,7 +249,7 @@ def main():
     try:
         global lansky_studios
         studios_str = input(f'What studios should be scraped: \'all\' or some combination of {list(lansky_studios_short_and_names.keys())}\n')
-        if studios_str.lower() == 'all':
+        if not studios_str or studios_str.lower() == 'all':
             pass
         else:
             lansky_studios = []
@@ -328,8 +327,6 @@ def main():
                     for href in refs:
                         process_video_url(driver, href, videos_dir, studio_name)
                     page += 1
-                except KeyboardInterrupt:
-                    raise
                 except Exception as ex:
                     print(f"Exception during processing page #{page} of {studio_name}: {ex!r}")
                     traceback.print_exc(file=sys.stdout)
