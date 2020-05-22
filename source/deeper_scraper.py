@@ -17,8 +17,18 @@ import glob
 import json
 import traceback
 import re
+import random
 
 timeout_sec = 2
+
+def try_n_times(functor, n, pause_s = 0):
+    for _ in range(n):
+        try:
+            functor()
+            break
+        except Exception as ex:
+            print(f"Exception: {ex!r}")
+            time.sleep(pause_s)
 
 
 def save_html(html, file_path):
@@ -82,13 +92,15 @@ def scrap_model(driver, model_url, models_dir):
 
 def process_video_url(driver, href, videos_dir, studio_name, force = False):
     video_dir = os.path.join(videos_dir, file_name_from_url(href))
-    if (glob.glob(video_dir + '/*.mp4') or not studio_name in free_demo_studios) and \
-        os.path.exists(f"{video_dir}/video.json") and os.path.exists(f"{video_dir}/video.html") and \
-        os.path.exists(f"{video_dir}/images/05.jpg") and os.path.exists(f"{video_dir}/images/07.jpg") and \
-        os.path.exists(f"{video_dir}/images/02.jpg") and os.path.exists(f"{video_dir}/images/06.jpg"):
+    is_already_filled = False
+    is_images_filled = os.path.exists(f"{video_dir}/images/05.jpg") and os.path.exists(f"{video_dir}/images/07.jpg") and \
+        os.path.exists(f"{video_dir}/images/02.jpg") and os.path.exists(f"{video_dir}/images/06.jpg")
+    if glob.glob(video_dir + '/*.mp4') and is_images_filled and \
+        os.path.exists(f"{video_dir}/video.json") and os.path.exists(f"{video_dir}/video.html"):
         print(f"'{video_dir}' was already filled")
+        is_already_filled = True
         if not force:
-            return
+            return 'already filled'
 
     check_directory(video_dir)
     vid_url = href + [autoplay_postfix, ''][href.endswith(autoplay_postfix)]
@@ -104,6 +116,8 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
             if 'window.__INITIAL_STATE__' in script.get_attribute('innerHTML'):
                 inner_state_script = script.get_attribute('innerHTML').strip()
                 #inner_json = json.loads(inner_state_script[27:-1]) # doesn't work anymore
+                if not inner_state_script.count('{'):
+                    continue
                 inner_json = json.loads(inner_state_script[inner_state_script.index('{'):].split(';')[0])
                 for video in inner_json['videos']:
                     if 'chapters' in video:
@@ -116,30 +130,26 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
                             json.dump(video, out_file, indent=4, sort_keys=True)
                         break
                 break
-    parse_metadata()
+    try:
+        parse_metadata()
+    except Exception as ex:
+        print(f"Exception: {ex!r}")
+        traceback.print_exc(file=sys.stdout)
 
     buttons = driver.find_elements_by_tag_name('button')
+    if not buttons:
+        print('buttons not found')
+    is_video_found = False
     for button in buttons:
         if button.get_attribute('title') == "Quality":
-
-            for i in range(10):
-                try:
-                    button.click()
-                    break
-                except Exception as ex:
-                    print(f"button.click() error: {ex!r}")
-                    time.sleep(1)
-
+            try_n_times(lambda: button.click(), n=10, pause_s=1)
             time.sleep(1)
             lis = driver.find_elements_by_tag_name('li')
             for li in lis:
+                is_video_found = True
                 #print(li.get_attribute('innerHTML'))
                 if '1080p' in li.get_attribute('innerHTML'):
-                    try:
-                        li.click()
-                    except Exception:
-                        time.sleep(1)
-                        li.click() # try one more time
+                    try_n_times(lambda: li.click(), n=5, pause_s=1)
                     time.sleep(1)
                     videos = driver.find_elements_by_tag_name('video')
                     for video in videos:
@@ -168,6 +178,10 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
 
                     break
             break
+    if not is_video_found:
+        print(f"Warning! Failed to play video {href}")
+        if is_already_filled:
+            return True
 
     def scrap_images():
         images_dir = f"{video_dir}/images"
@@ -224,10 +238,9 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
                                 file_name = file_name_from_url(image_url)
                                 urlretrieve(image_url, f"{images_dir}/{file_name}")
                                 print(file_name, 'is saved')
+                            break
                         except Exception:
                             print("failed #", _)
-                        else:
-                            break
                     if 'members.' in driver.current_url:
                         print('redirected to', driver.current_url)
                         break
@@ -238,11 +251,136 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
         find_elements_by_tag_name('a')
     model_urls = [m.get_attribute('href') for m in models]
 
-    scrap_images()
+    if not is_images_filled:
+        try:
+            scrap_images()
+        except Exception as ex:
+            print(f"Failed to scrap images: {ex!r}")
+            traceback.print_exc(file=sys.stdout)
 
     models_dir = f"{os.path.dirname(videos_dir)}/models"
     for model_url in model_urls:
         scrap_model(driver, model_url, models_dir)
+    return is_video_found
+
+
+def scraping_recent_lansky(lansky_studios):
+    driver = webdriver.Firefox(executable_path = geckodriver_path)
+    driver.set_page_load_timeout(20)
+    driver.minimize_window()
+
+    print('\nscraping recent lansky videos...')
+    
+    try:
+        for studio_name in lansky_studios:
+            main_page = f'https://www.{studio_name}.com'
+            base_dir = f'{studio_name}_content'
+    
+            videos_dir = f"{base_dir}/videos"
+            check_directory(videos_dir)
+    
+            driver.get(main_page)
+            clock_next = None
+            for _ in range(3): # try a few times
+                try:
+                    clock_next = driver.find_elements_by_xpath("//p[@data-test-component='ClockDateTitle']")
+                    break
+                except Exception as ex:
+                    print(f"Error during ClockDateTitle search ({studio_name}): {ex!r}")
+                    time.sleep(timeout_sec)
+            if clock_next:
+                print(f"watch next on {main_page} at {clock_next[0].get_attribute('innerHTML')}")
+            else:
+                divs_below_model_list = driver.find_elements_by_xpath("//div[@data-test-component='ModelList']/following-sibling::div")
+                for potential_footer_video in divs_below_model_list:
+                    if potential_footer_video.find_elements_by_tag_name('h2') and potential_footer_video.find_elements_by_tag_name('a'):
+                        href = potential_footer_video.find_element_by_tag_name('a').get_attribute('href')
+                        if not 'members.' in href:
+                            print('newest scene:', href)
+                            process_video_url(driver, href, videos_dir, studio_name, force=False)
+                            break
+                        else:
+                            continue
+    
+            hero = driver.find_elements_by_xpath("//div[@data-test-component='VideoHero']")
+            if hero and hero[0].find_elements_by_tag_name('a'):
+                href = hero[0].find_element_by_tag_name('a').get_attribute('href')
+                if not 'members.' in href:
+                    print('hero scene:', href)
+                    process_video_url(driver, href, videos_dir, studio_name, force=False)
+    except Exception as ex:
+        print(f"Exception: {ex!r}")
+        traceback.print_exc(file=sys.stdout)
+        
+    driver.quit()
+
+
+def scraping_older_lansky(lansky_studios):
+    driver = webdriver.Firefox(executable_path = geckodriver_path)
+    driver.set_page_load_timeout(20)
+    driver.minimize_window()
+    
+    print('\nscraping older lansky videos...')
+    
+    success = True
+    fails_count = 0
+    
+    try:
+        for studio_name in list(lansky_studios):
+            main_page = f'https://www.{studio_name}.com'
+            base_dir = f'{studio_name}_content'
+    
+            videos_dir = f"{base_dir}/videos"
+            check_directory(videos_dir)
+    
+            fails_count = 0
+            page, last_page = 1, 100
+            while page <= last_page:
+                try:
+                    url = f'{main_page}/videos?page={page}&size=12'
+                    driver.get(url)
+                    wait_for_js(driver)
+                    time.sleep(timeout_sec)
+    
+                    if page == 1:
+                        last_ref = driver.find_element_by_xpath("//a[@data-test-component='PaginationLast']").get_attribute('href')
+                        last_page = int(re.search('page=(\d+)', last_ref).group(1))
+                        print(f"{studio_name} page count is {last_page}")
+    
+                    save_html(driver.page_source, f"{videos_dir}/videos{page}.html")
+                    vid_containers = driver.find_elements_by_xpath(f"//div[@data-test-component='VideoThumbnailContainer']")
+                    refs = [container.find_element_by_tag_name('a').get_attribute('href') for container in vid_containers]
+                    if not refs:
+                        break
+                    already_filled_number = 0
+                    for href in refs:
+                        is_ok = process_video_url(driver, href, videos_dir, studio_name, force=False)
+                        if not is_ok:
+                            success = False
+                            fails_count += 1
+                            break
+                        already_filled_number += (is_ok == 'already filled')
+                    if len(refs) == already_filled_number:
+                        page += random.randint(0, 4)
+                        
+                    if fails_count > 2:
+                        print(f"{studio_name}: too many fails, move on")
+                        break
+                    
+                    page += 1
+                except Exception as ex:
+                    print(f"Exception during processing page #{page} of {studio_name}: {ex!r}")
+                    traceback.print_exc(file=sys.stdout)
+                    fails_count += 1
+            if not fails_count:
+                print(f"{studio_name} is successfuly scrapped!")
+                lansky_studios.remove(studio_name)
+    except Exception as ex:
+        print(f"Exception: {ex!r}")
+        traceback.print_exc(file=sys.stdout)
+        
+    driver.quit()
+    return success
 
 
 def main():
@@ -259,77 +397,10 @@ def main():
         print(f'{lansky_studios} will be scraped')
 
 
-        driver = webdriver.Firefox(executable_path = geckodriver_path)
-        driver.set_page_load_timeout(20)
-        driver.minimize_window()
-
-        print('\nscraping recent lansky videos...')
-        for studio_name in lansky_studios:
-            main_page = f'https://www.{studio_name}.com'
-            base_dir = f'{studio_name}_content'
-
-            videos_dir = f"{base_dir}/videos"
-            check_directory(videos_dir)
-
-            driver.get(main_page)
-            clock_next = None
-            for _ in range(3): # try a few times
-                try:
-                    clock_next = driver.find_elements_by_xpath("//p[@data-test-component='ClockDateTitle']")
-                except Exception as ex:
-                    print(f"Error during ClockDateTitle search ({studio_name}): {ex!r}")
-                    time.sleep(timeout_sec)
-                else:
-                    break
-            if clock_next:
-                print(f"watch next on {main_page} at {clock_next[0].get_attribute('innerHTML')}")
-            else:
-                footer_video = driver.find_elements_by_xpath("//div[@data-test-component='ModelList']/following-sibling::div")
-                if footer_video and footer_video[0].find_elements_by_tag_name('a'):
-                    href = footer_video[0].find_element_by_tag_name('a').get_attribute('href')
-                    if not 'members.' in href:
-                        print('newest scene:', href)
-                        process_video_url(driver, href, videos_dir, studio_name, force=True)
-
-            hero = driver.find_elements_by_xpath("//div[@data-test-component='VideoHero']")
-            if hero and hero[0].find_elements_by_tag_name('a'):
-                href = hero[0].find_element_by_tag_name('a').get_attribute('href')
-                if not 'members.' in href:
-                    print('hero scene:', href)
-                    process_video_url(driver, href, videos_dir, studio_name, force=True)
-
-        print('\nscraping older lansky videos...')
-        for studio_name in lansky_studios:
-            main_page = f'https://www.{studio_name}.com'
-            base_dir = f'{studio_name}_content'
-
-            videos_dir = f"{base_dir}/videos"
-            check_directory(videos_dir)
-
-            page, last_page = 1, 100
-            while page <= last_page:
-                try:
-                    url = f'{main_page}/videos?page={page}&size=12'
-                    driver.get(url)
-                    wait_for_js(driver)
-                    time.sleep(timeout_sec)
-
-                    if page == 1:
-                        last_ref = driver.find_element_by_xpath("//a[@data-test-component='PaginationLast']").get_attribute('href')
-                        last_page = int(re.search('page=(\d+)', last_ref).group(1))
-                        print(f"{studio_name} page count is {last_page}")
-
-                    save_html(driver.page_source, f"{videos_dir}/videos{page}.html")
-                    vid_containers = driver.find_elements_by_xpath(f"//div[@data-test-component='VideoThumbnailContainer']")
-                    refs = [container.find_element_by_tag_name('a').get_attribute('href') for container in vid_containers]
-                    if not refs:
-                        break
-                    for href in refs:
-                        process_video_url(driver, href, videos_dir, studio_name)
-                    page += 1
-                except Exception as ex:
-                    print(f"Exception during processing page #{page} of {studio_name}: {ex!r}")
-                    traceback.print_exc(file=sys.stdout)
+        scraping_recent_lansky(lansky_studios)
+        
+        while not scraping_older_lansky(lansky_studios):
+            random.shuffle(lansky_studios)
 
     except Exception as ex:
         print(f"Exception: {ex!r}")
@@ -338,7 +409,7 @@ def main():
         print("success")
 
     print('finished')
-    driver.quit()
+    
 
 
 if __name__ == '__main__':
