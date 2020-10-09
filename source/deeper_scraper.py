@@ -7,7 +7,9 @@ Created on Mon Oct 28 16:30:55 2019
 
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import InvalidSessionIdException
 from urllib.request import urlretrieve
+from collections import defaultdict
 import sys
 import os
 import time
@@ -122,9 +124,13 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
                 for video in inner_json['videos']:
                     if 'chapters' in video:
                         print('\n------------------------------------------------')
-                        print(video['modelsSpaced'], '-', video['title'], 'by', video['directorNames'])
-                        print(video['description'])
-                        print(video['tags'])
+                        try:
+                            print(video['modelsSpaced'], '-', video['title'], 'by', video['directorNames'])
+                            print(video['description'])
+                            print(video['tags'])
+                        except Exception as ex:
+                            print(f"Exception: {ex!r}")
+                            print(video.keys())
                         print('------------------------------------------------\n')
                         with open(f"{video_dir}/video.json", "w") as out_file:
                             json.dump(video, out_file, indent=4, sort_keys=True)
@@ -140,6 +146,9 @@ def process_video_url(driver, href, videos_dir, studio_name, force = False):
     if not buttons:
         print('buttons not found')
     is_video_found = False
+    div_play = driver.find_element_by_xpath('//div[@data-test-component="PlayButton"]')
+    if div_play:
+        try_n_times(lambda: div_play.click(), n=5, pause_s=1)
     for button in buttons:
         if button.get_attribute('title') == "Quality":
             try_n_times(lambda: button.click(), n=10, pause_s=1)
@@ -271,6 +280,8 @@ def scraping_recent_lansky(lansky_studios):
 
     print('\nscraping recent lansky videos...')
     
+    exception = None
+    
     try:
         for studio_name in lansky_studios:
             main_page = f'https://www.{studio_name}.com'
@@ -284,6 +295,9 @@ def scraping_recent_lansky(lansky_studios):
             for _ in range(3): # try a few times
                 try:
                     clock_next = driver.find_elements_by_xpath("//p[@data-test-component='ClockDateTitle']")
+                    break
+                except InvalidSessionIdException as ex:
+                    exception = ex
                     break
                 except Exception as ex:
                     print(f"Error during ClockDateTitle search ({studio_name}): {ex!r}")
@@ -313,9 +327,16 @@ def scraping_recent_lansky(lansky_studios):
         traceback.print_exc(file=sys.stdout)
         
     driver.quit()
+    if exception:
+        raise exception
 
+
+cache_failed_video_refs = []
+first_time_scraping_older_lansky = True
+already_processed_pages_by_studio = defaultdict(list)
 
 def scraping_older_lansky(lansky_studios):
+    global first_time_scraping_older_lansky
     driver = webdriver.Firefox(executable_path = geckodriver_path)
     driver.set_page_load_timeout(20)
     driver.minimize_window()
@@ -324,6 +345,7 @@ def scraping_older_lansky(lansky_studios):
     
     success = True
     fails_count = 0
+    exception = None
     
     try:
         for studio_name in list(lansky_studios):
@@ -336,6 +358,9 @@ def scraping_older_lansky(lansky_studios):
             fails_count = 0
             page, last_page = 1, 100
             while page <= last_page:
+                if page in already_processed_pages_by_studio[studio_name]:
+                    page += 1
+                    continue
                 try:
                     url = f'{main_page}/videos?page={page}&size=12'
                     driver.get(url)
@@ -353,14 +378,24 @@ def scraping_older_lansky(lansky_studios):
                     if not refs:
                         break
                     already_filled_number = 0
-                    for href in refs:
-                        is_ok = process_video_url(driver, href, videos_dir, studio_name, force=False)
+                    already_processed_number = 0
+                    for ref in refs:
+                        already_processed_number += 1
+                        if ref in cache_failed_video_refs:
+          
+                            success = False
+                            continue
+                        is_ok = process_video_url(driver, ref, videos_dir, studio_name, force=False)
                         if not is_ok:
                             success = False
                             fails_count += 1
-                            break
+                            cache_failed_video_refs.append(ref)
+                            if first_time_scraping_older_lansky:
+                                break
                         already_filled_number += (is_ok == 'already filled')
-                    if len(refs) == already_filled_number:
+                    if len(refs) == already_processed_number:
+                        already_processed_pages_by_studio[studio_name].append(page)
+                    if len(refs) == already_filled_number and first_time_scraping_older_lansky:
                         page += random.randint(0, 4)
                         
                     if fails_count > 2:
@@ -368,18 +403,27 @@ def scraping_older_lansky(lansky_studios):
                         break
                     
                     page += 1
+                except InvalidSessionIdException as ex:
+                    exception = ex
+                    break
                 except Exception as ex:
                     print(f"Exception during processing page #{page} of {studio_name}: {ex!r}")
                     traceback.print_exc(file=sys.stdout)
                     fails_count += 1
             if not fails_count:
-                print(f"{studio_name} is successfuly scrapped!")
+                if success:
+                    print(f"{studio_name} is successfuly scrapped!")
                 lansky_studios.remove(studio_name)
+            if exception:
+                break
     except Exception as ex:
         print(f"Exception: {ex!r}")
         traceback.print_exc(file=sys.stdout)
         
     driver.quit()
+    first_time_scraping_older_lansky = False
+    if exception:
+        raise exception
     return success
 
 
@@ -390,10 +434,7 @@ def main():
         if not studios_str or studios_str.lower() == 'all':
             pass
         else:
-            lansky_studios = []
-            for s in studios_str.split():
-                if s in lansky_studios_short_and_names:
-                    lansky_studios.append(lansky_studios_short_and_names[s])
+            lansky_studios = [lansky_studios_short_and_names[s] for s in studios_str.split() if s in lansky_studios_short_and_names]
         print(f'{lansky_studios} will be scraped')
 
 
@@ -406,7 +447,10 @@ def main():
         print(f"Exception: {ex!r}")
         traceback.print_exc(file=sys.stdout)
     else:
-        print("success")
+        if not cache_failed_video_refs:
+            print("success")
+        else:
+            print(f"failed to scrap: {cache_failed_video_refs}")
 
     print('finished')
     
